@@ -11,6 +11,9 @@ import os
 import json
 import hashlib
 import hmac
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone
 from typing import Dict, Any, List
 
@@ -28,6 +31,16 @@ SECRETKEY = os.environ.get("SECRETKEY")
 
 # pushplus_token
 PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
+
+# ---------- 邮件通知配置 ----------
+MAIL_SMTP = os.environ.get("MAIL_SMTP")
+MAIL_PORT = int(os.environ.get("MAIL_PORT", "465"))
+MAIL_USER = os.environ.get("MAIL_USER")
+MAIL_PASS = os.environ.get("MAIL_PASS")
+MAIL_TO = os.environ.get("MAIL_TO")
+
+# 通知方式: mail / pushplus（默认 pushplus）
+NOTIFY_TYPE = os.environ.get("NOTIFY_TYPE", "pushplus").lower()
 
 # 默认超时时间（秒）
 DEFAULT_TIMEOUT = 30
@@ -262,6 +275,46 @@ def pushplus(content: str):
         print(f"消息推送失败: {e}")
 
 
+def send_mail(content: str):
+    """
+    发送邮件通知
+
+    Args:
+        content: 邮件正文内容
+    """
+    if not all([MAIL_SMTP, MAIL_USER, MAIL_PASS, MAIL_TO]):
+        print("邮件配置不完整，跳过邮件通知")
+        return
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "IP优选DNSPOD推送"
+    msg["From"] = MAIL_USER
+    msg["To"] = MAIL_TO
+
+    html_body = content.replace("\n", "<br>")
+    html_part = MIMEText(
+        f"<html><body><h3>IP优选DNSPOD推送</h3><p>{html_body}</p>"
+        f"<p style='color:#999;font-size:12px;'>发送时间: "
+        f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}</p></body></html>",
+        "html", "utf-8"
+    )
+    msg.attach(html_part)
+
+    try:
+        if MAIL_PORT == 465:
+            server = smtplib.SMTP_SSL(MAIL_SMTP, MAIL_PORT, timeout=DEFAULT_TIMEOUT)
+        else:
+            server = smtplib.SMTP(MAIL_SMTP, MAIL_PORT, timeout=DEFAULT_TIMEOUT)
+            server.starttls()
+
+        server.login(MAIL_USER, MAIL_PASS)
+        server.sendmail(MAIL_USER, MAIL_TO.split(","), msg.as_string())
+        server.quit()
+        print("邮件通知发送成功")
+    except Exception as e:
+        print(f"邮件通知发送失败: {e}")
+
+
 def main():
     """主函数"""
     # 检查必要的环境变量
@@ -297,7 +350,11 @@ def main():
 
     # 发送推送
     if pushplus_content:
-        pushplus('\n'.join(pushplus_content))
+        notify_text = '\n'.join(pushplus_content)
+        if NOTIFY_TYPE == "mail":
+            send_mail(notify_text)
+        else:
+            pushplus(notify_text)
 
 
 if __name__ == '__main__':
