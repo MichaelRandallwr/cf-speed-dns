@@ -5,7 +5,8 @@ env:
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    # 每 3 小时更新一次 Cloudflare DNS（UTC）
+    - cron: '0 */3 * * *'
   workflow_dispatch:
 
 jobs:

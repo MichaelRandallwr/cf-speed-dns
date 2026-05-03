@@ -12,9 +12,11 @@ import json
 import hashlib
 import hmac
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 import requests
+
+from cf_speed_ips import load_cf_speed_ips
 
 # 域名和子域名
 DOMAIN = os.environ.get('DOMAIN')
@@ -29,14 +31,6 @@ PUSHPLUS_TOKEN = os.environ.get("PUSHPLUS_TOKEN")
 
 # 默认超时时间（秒）
 DEFAULT_TIMEOUT = 30
-
-# Cloudflare 优选 IP 列表来源（从 Top10 接口取前 N 条，默认 5）
-CF_SPEED_IP_URL = os.environ.get("CF_SPEED_IP_URL", "https://ip.164746.xyz/ipTop10.html")
-try:
-    _speed_ip_max = int(os.environ.get("SPEED_IP_MAX", "5"))
-except ValueError:
-    _speed_ip_max = 5
-SPEED_IP_MAX = min(max(_speed_ip_max, 1), 50)
 
 
 class TencentCloudSigner:
@@ -187,48 +181,6 @@ class DnsPodClient:
         return {"code": 0, "message": "None"}
 
 
-def parse_cf_speed_ips(raw: str, limit: int) -> List[str]:
-    """从接口返回的正文中解析优选 IP（逗号分隔；支持多行、去重、最多 limit 条）。"""
-    out: List[str] = []
-    seen: set[str] = set()
-    for line in raw.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-        for chunk in line.split(","):
-            s = chunk.strip()
-            if s and s not in seen:
-                seen.add(s)
-                out.append(s)
-                if len(out) >= limit:
-                    return out
-    return out
-
-
-def get_cf_speed_test_ip(timeout=10, max_retries=5) -> Optional[List[str]]:
-    """
-    获取 Cloudflare 优选 IP（TOP N，默认 5）
-
-    Args:
-        timeout: 单次请求超时时间
-        max_retries: 最大重试次数
-
-    Returns:
-        优选 IP 列表；失败或无有效 IP 时返回 None
-    """
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(
-                CF_SPEED_IP_URL,
-                timeout=timeout
-            )
-            if response.status_code == 200:
-                ips = parse_cf_speed_ips(response.text, SPEED_IP_MAX)
-                return ips if ips else None
-        except Exception as e:
-            print(f"获取优选 IP 失败 (尝试 {attempt + 1}/{max_retries}): {e}")
-            if attempt == max_retries - 1:
-                traceback.print_exc()
-    return None
-
-
 def build_info(client: DnsPodClient) -> List[Dict[str, Any]]:
     """
     构建 DNS 记录信息
@@ -327,12 +279,9 @@ def main():
         return
 
     # 获取最新优选 IP（默认前 5）
-    ip_addresses = get_cf_speed_test_ip()
+    ip_addresses = load_cf_speed_ips()
     if not ip_addresses:
         print("错误: 无法获取优选 IP")
-        return
-    if not ip_addresses:
-        print("错误: 未解析到有效 IP 地址")
         return
 
     # 检查记录数量是否足够

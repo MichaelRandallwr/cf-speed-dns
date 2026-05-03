@@ -1,0 +1,44 @@
+name: cf_speed_ips_sync
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    # 每 2 小时同步一次优选 IP 列表（UTC）
+    - cron: '15 */2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cf_speed_ips_sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Top10 IPs
+        env:
+          CF_SPEED_IP_URL: https://ip.164746.xyz/ipTop10.html
+        run: |
+          curl -fsSL "${CF_SPEED_IP_URL}" | tr -d '\r' > cf_speed_ips.txt
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cf_speed_ips.txt
+          if git diff --staged --quiet; then
+            echo "cf_speed_ips.txt 无变化，跳过提交"
+          else
+            git commit -m "chore: sync cf speed ips [skip ci]"
+            git push
+          fi
