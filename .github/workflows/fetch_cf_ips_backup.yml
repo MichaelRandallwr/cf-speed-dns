@@ -1,0 +1,53 @@
+name: cf_speed_ips_sync_backup
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    # 每 2 小时同步（默认禁用，主源挂掉后手动启用）
+    - cron: '15 */2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cf_speed_ips_sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch Top5 IPs from backup source
+        env:
+          CF_SPEED_IP_BACKUP_URL: ${{ secrets.CF_SPEED_IP_BACKUP_URL }}
+        run: |
+          if [ -z "$CF_SPEED_IP_BACKUP_URL" ]; then
+            echo "错误: 未设置 CF_SPEED_IP_BACKUP_URL secret"
+            exit 1
+          fi
+          # 请求 API，用 jq 提取前 5 个 IP，逗号拼接写入文件
+          curl -fsSL "${CF_SPEED_IP_BACKUP_URL}/api/results" \
+            | jq -r '[.results[:5][].ip] | join(",")' \
+            > cf_speed_ips.txt
+          echo "获取到的优选 IP："
+          cat cf_speed_ips.txt
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cf_speed_ips.txt
+          if git diff --staged --quiet; then
+            echo "cf_speed_ips.txt 无变化，跳过提交"
+          else
+            git commit -m "chore: sync cf speed ips from backup [skip ci]"
+            git push
+          fi
